@@ -9,21 +9,21 @@ var PPI = 96
 /******************************************/
 
 /* frame rate in frames/s */
-FRAMERATE = 40
+FRAMERATE = 4
 
 /* distance from eye to screen in centimeters */
 EYE_SCREEN_DIST_IN = 2
 
 /* maximum radius in visual field angle degrees */
-MAX_PHI = 60
-PHI_INC = 10
+MAX_PHI = 35
+PHI_INC = 5
 
 /* maximum theta in degrees */
 MAX_THETA = 360
 THETA_INC = 10
 
 /* tabulate scaling factor */
-TABULATE_SCALING_FACTOR_IN = 0.01
+TABULATE_SCALING_FACTOR_IN = 0.03
 
 /******************************************/
 // DATA STRUCTURES
@@ -42,17 +42,21 @@ for (var i = 0; i < scotoMap.length; i++) {
 }
 
 // current location of test point
-var phi = 10
+var phi = THETA_INC
 var theta = 0
 
 // current mode: 1 for SEEN, 0 for NOT SEEN
 var seenMode = 1
 
 // viewing mode: "measure" or "tabulate"
-var viewMode = "tabulate"
+var viewMode = "measure"
 
 // number of segments per second the scotoma probe moves
 var moveSpeedSegmentsPerSec = 1
+
+var cyclesPerCircle = parseInt(MAX_THETA/THETA_INC)
+var cycleCount = 0
+
 
 /******************************************/
 // KEYBOARD CONTROL
@@ -68,20 +72,18 @@ function recordSeenMode() {
 }
 
 function move() {
-    if (viewMode != "measure") {
-        return;
-    }
+    if (viewMode == "measure") {
+        recordSeenMode();
 
-    recordSeenMode();
-    theta = theta + THETA_INC;
+        cycleCount++;
 
-    if (theta > MAX_THETA){
-        theta = theta % MAX_THETA;
-        phi = phi + PHI_INC;
-    }
-    if (phi > MAX_PHI){
-        console.log("done");
-        viewMode = "tabulate"
+        theta = theta + THETA_INC % MAX_THETA;
+        if (cycleCount % cyclesPerCircle == 0) {
+            phi = phi + PHI_INC
+        }
+        if (phi >= MAX_PHI){
+            viewMode = "tabulate"
+        }
     }
 }
 
@@ -153,13 +155,29 @@ function drawX(ctx, x, y, size=5) {
     ctx.stroke();
 }
 
+/**
+ * draw measure indicator
+ */
+function drawMeasureIndicator(ctx, x, y, type) {
+    if (type == -1) {
+        // not measured
+        drawX(ctx, x, y)
+    } else if (type == 0) {
+        // NOT seen (scotoma)
+        drawCircle(ctx, x, y, 5, "#0FF")
+    } else if (type == 1) {
+        // seen (intact visual field)
+        drawCircle(ctx, x, y, 5, "#000")
+    }
+}
+
+
 /******************************************/
 // MAIN DRAWING
 /******************************************/
 
 function renderMeasure(ctx) {
     circle_coords = visual2Cartesian(phi, theta);
-    console.log([phi, theta])
     drawCircle(ctx, circle_coords[0], circle_coords[1]);
 
     center_coords = visual2Cartesian(0, 0);
@@ -168,19 +186,46 @@ function renderMeasure(ctx) {
 
 function renderTabulate(ctx) {
     center_coords = polar2Cartesian(0, 0);
-    drawX(ctx, center_coords[0], center_coords[1])
 
-    majorAngles = [10,20,30,40,50,60]
-
-    for (var i = 0; i < majorAngles.length; i++) {
+    // render circles for phi
+    majorAnglesPhi = [10,20,30]
+    for (var i = 0; i < majorAnglesPhi.length; i++) {
         circle_coords = polar2Cartesian(
-            majorAngles[i] * TABULATE_SCALING_FACTOR_IN, 0);
-        console.log(circle_coords)
+            majorAnglesPhi[i] * TABULATE_SCALING_FACTOR_IN, 0);
 
         ctx.beginPath();
         ctx.arc(center_coords[0], center_coords[1], 
             circle_coords[0] - center_coords[0], 0, 2 * Math.PI);
         ctx.stroke();
+    }
+
+    max_r_in = TABULATE_SCALING_FACTOR_IN * (
+                    Math.max(...majorAnglesPhi) + 5
+                )
+
+    // render lines for theta
+    majorAnglesTheta = [0, 45, 90, 135, 180, 225, 270, 315]
+    for (var i = 0; i < majorAnglesTheta.length; i++) {
+        circle_coords = polar2Cartesian(
+            max_r_in, majorAnglesTheta[i]);
+
+        ctx.beginPath();
+        ctx.moveTo(center_coords[0], center_coords[1]);
+        ctx.lineTo(circle_coords[0], circle_coords[1]);
+        ctx.stroke();
+    }
+
+    // render scotoma measurements
+    for (var i = 0; i < scotoMap.length; i++) {
+        for (var j = 0; j < scotoMap[i].length; j++) {
+            measure_coords = polar2Cartesian(
+                i * PHI_INC * TABULATE_SCALING_FACTOR_IN,
+                j * THETA_INC)
+
+            drawMeasureIndicator(ctx, 
+                measure_coords[0], measure_coords[1],
+                scotoMap[i][j])
+        }
     }
 }
 
@@ -208,6 +253,18 @@ function frame() {
     draw();
 }
 
+function interactKeyDown(e) {
+    console.log(e)
+    if (e.which == 32) {
+        seenMode = 1
+        frame();
+    }
+    else if (e.which == 88) {
+        seenMode = 0
+        frame();
+    }
+}
+
 /******************************************/
 // GLUE CODE FOR RESIZING
 /******************************************/
@@ -230,7 +287,5 @@ init = function() {
 
     // bind event listeners
     window.addEventListener('resize', resizeCanvas, false);
-
-    // begin mapping loop
-    setInterval(frame, 1000 / FRAMERATE);
+    document.addEventListener('keydown', interactKeyDown);
 }
